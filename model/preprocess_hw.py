@@ -1,0 +1,149 @@
+# -*- coding: utf-8 -*-
+from __future__ import print_function
+from __future__ import absolute_import
+
+import argparse
+import sys
+import numpy as np
+import scipy.misc
+import os
+from PIL import Image
+from PIL import ImageDraw
+from PIL import ImageFont
+import json
+import collections
+import random
+reload(sys)
+sys.setdefaultencoding("utf-8")
+from matplotlib import pyplot as plt 
+
+prev = 0
+
+#split_ratio = 0.3
+#ratioA = 0.1
+#ratioB = 0.1
+#def draw_single_char(ch, font, canvas_size=256, x_offset=0, y_offset=0):
+#    img = Image.new("RGB", (canvas_size, canvas_size), (255, 255, 255))
+#    draw = ImageDraw.Draw(img)
+#    draw.text((x_offset, y_offset), ch, (0, 0, 0), font=font)
+#    return img
+
+
+def draw_single_char(ch, font, canvas_size=128, x_offset=0, y_offset=0):
+    print(ch)
+    img = Image.new("L", (canvas_size, canvas_size), 255)
+    draw = ImageDraw.Draw(img)
+    draw.text((x_offset, y_offset), ch, 0, font=font)
+    plt.imshow(img)
+    plt.show()
+    return img
+
+
+
+
+def resize_image(img):
+    # pad to square
+    pad_size = int(abs(img.shape[0]-img.shape[1]) / 2)
+    if img.shape[0] < img.shape[1]:
+        pad_dims = ((pad_size, pad_size), (0, 0))
+    else:
+        pad_dims = ((0, 0), (pad_size, pad_size))
+    img = np.lib.pad(img, pad_dims, mode='constant', constant_values=255)
+    # resize
+    img = scipy.misc.imresize(img, (128, 128))
+    assert img.shape == (128, 128)
+    # img = scipy.misc.imresize(img, (256, 256))
+    # assert img.shape == (256, 256)
+    return img
+
+
+def main(path, source_path, ratioA, ratioB, percentage):
+    global prev 
+    source_font = ImageFont.truetype(source_path, size=128)
+    f = open(path, "rb")
+    directory, name = os.path.split(path)
+    random.seed(20171201)
+    charlist = []
+    bitmaplist = []
+    sourcelist = []
+    tmp = []
+    filename = os.path.basename(path).split('.')[0]
+    datafolder = os.path.join(os.path.normpath(directory + os.sep + os.pardir), 'datasets_128')
+    if not os.path.exists(datafolder):
+        os.makedirs(datafolder)
+    trainA_path = os.path.join(datafolder, 'trainA')
+    trainB_path = os.path.join(datafolder, 'trainB')
+    testA_path = os.path.join(datafolder, 'testA')
+    testB_path = os.path.join(datafolder, 'testB')
+    folders = [trainA_path,trainB_path, testA_path, testB_path]
+    for folder in folders:
+        if not os.path.exists(folder):
+            os.mkdir(folder)
+    while True:
+        tmp = f.read(4)
+        if len(tmp) is 0:
+            break
+        else:
+            sample_size = np.fromstring(tmp, dtype=np.uint32).item()
+            tag_code = np.fromstring(f.read(2), dtype=np.uint16).newbyteorder().item()
+            width = np.fromstring(f.read(2), dtype=np.uint16).item()
+            height = np.fromstring(f.read(2), dtype=np.uint16).item()
+            bitmap = np.fromstring(f.read(width * height), dtype=np.uint8)
+            bitmap = bitmap.reshape([height, width])
+            bitmap = resize_image(bitmap)
+            # print(np.shape(bitmap))
+            if (random.randrange(100) <= percentage):
+                bitmaplist.append(bitmap)
+                ch = bytearray.fromhex(str(hex(tag_code))[2:]).decode('gb2312')
+                charlist.append(ch)
+                source_img = draw_single_char(ch, font = source_font)
+                sourcelist.append(source_img)
+
+    print("Number of images: {}".format(len(sourcelist)))
+    arr = np.arange(len(charlist))
+    np.random.shuffle(arr)
+    ntrainA = np.floor(float(ratioA) * len(charlist))
+    ntrainB = np.floor(float(ratioB) * len(charlist))
+    for i, x in enumerate(np.arange(len(arr))):
+    	ch = charlist[arr[x]]
+        bitmap = bitmaplist[arr[x]]
+        source_img = sourcelist[arr[x]]
+        # print(i+prev)
+        if arr[x]<=ntrainA and arr[x]<=ntrainB:
+            scipy.misc.imsave(os.path.join(trainA_path, str(i+prev) + '.png'), bitmap)
+            scipy.misc.imsave(os.path.join(trainB_path, str(i+prev) + '.png'), source_img)
+        elif arr[x]>ntrainA and arr[x]<=ntrainB:
+            scipy.misc.imsave(os.path.join(testA_path, str(i+prev) + '.png'), bitmap)
+            scipy.misc.imsave(os.path.join(trainB_path, str(i+prev) + '.png'), source_img)
+        elif arr[x]<=ntrainA and arr[x]>ntrainB:
+            scipy.misc.imsave(os.path.join(trainA_path, str(i+prev) + '.png'), bitmap)
+            scipy.misc.imsave(os.path.join(testB_path, str(i+prev) + '.png'), source_img)
+        else:
+            scipy.misc.imsave(os.path.join(testA_path, str(i+prev) + '.png'), bitmap)
+            scipy.misc.imsave(os.path.join(testB_path, str(i+prev) + '.png'), source_img)
+            # scipy.misc.imsave(os.path.join(testB_path, str(ord(ch)) + '.png'), source_img)
+    prev += len(arr)
+
+
+if __name__ == '__main__':
+    import os
+    import glob
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Preprocessing data")
+    parser.add_argument('--path', dest='path', help="input file(s) to process")
+    parser.add_argument('--font', dest='font', help="font to process")
+    parser.add_argument('--ratioA', dest='ratioA', type=float, default='0.7', help='the split ratio of the training and test data')
+    parser.add_argument('--ratioB', dest='ratioB', type=float, default='0.7', help='the split ratio of the training and test data')
+    parser.add_argument('--percent', dest='percent', type=int, default='50', help='the wanted percentage of dataset')
+    args = parser.parse_args()
+
+    # main(sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4])
+    files = os.listdir(args.path)
+    print("Font: ", args.font)
+    for file in files:
+        print("File: ", os.path.join(args.path, file))
+        try:
+            main(os.path.join(args.path, file), args.font, args.ratioA, args.ratioB, args.percent)
+        except: 
+            pass
